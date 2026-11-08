@@ -1,14 +1,18 @@
-# ReMat Digital Twin V1
+# ReMat Digital Twin V2
 
-An interactive proof-of-concept dashboard for brine calcium precipitation and magnesium recovery.
+Interactive animated process overview, mass balances, pH scenario curves, and illustrative electrochemical model.
 
 ## Run
-1. Install Python 3.10+.
-2. Open a terminal in this folder.
-3. `pip install -r requirements.txt`
-4. `streamlit run app.py`
 
-The browser opens automatically, typically at http://localhost:8501.
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
 
-## Important
-This version provides mass-balance calculations and explicitly adjustable hypothetical efficiencies, not calibrated chemical predictions. The pH slider is display-only. The sodium carbonate dose is checked for theoretical stoichiometric sufficiency but does not determine calcium removal. Do not present numerical outputs as validated experimental results.
+## Update an existing Streamlit Community Cloud app
+
+On GitHub, replace the repository root `app.py` and `requirements.txt` with these V2 files, then commit. The existing Streamlit app should redeploy automatically. Keep the `main` branch and `app.py` entry point.
+
+## Scientific caution
+
+V2 uses **illustrative, uncalibrated** pH/precipitation response functions and a lumped electrical circuit. It is not a thermodynamic or validated electrochemical prediction. Calibrate with laboratory data and a PHREEQC model before treating outputs as forecasts.
