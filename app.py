@@ -1,99 +1,139 @@
+import math
 import streamlit as st
-import numpy as np
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit.components.v1 as components
 
-st.set_page_config(page_title='ReMat | Digital Twin V2', page_icon='💧', layout='wide')
-st.markdown('''<style>.block-container{padding-top:1.3rem}.stMetric{background:#edf7fa;padding:12px;border-radius:12px}h1,h2,h3{color:#123451}</style>''',unsafe_allow_html=True)
-st.title('💧 ReMat Digital Twin | V2')
-st.caption('Interactive process visualization + transparent, exploratory chemistry/electrochemistry models. Not a validated process simulator.')
+st.set_page_config(page_title='ReMat Virtual Laboratory V3',page_icon='🧪',layout='wide')
+STAGES=['Pre-filtration','Calcium precipitation','Electrochemical cell','Product recovery']
+for k,v in {'stage':0,'running':False,'progress':0}.items():
+    if k not in st.session_state: st.session_state[k]=v
+st.title('🧪 ReMat | Virtual Laboratory V3')
+st.caption('5-L bench-scale visual experiment · interactive stage controls · exploratory scenario calculations, NOT validated laboratory predictions')
 with st.sidebar:
- st.header('⚙️ Operating conditions')
- volume=st.slider('Batch volume (L)',1.,20.,5.,.5)
- ca=st.slider('Ca²⁺ (mg/L)',100,2500,800,50)
- mg=st.slider('Mg²⁺ (mg/L)',100,4000,1500,50)
- ph=st.slider('Precipitation pH',7.,12.,9.5,.1)
- dose=st.slider('Na₂CO₃ dose (g/L)',0.,5.,2.2,.1)
- st.divider()
- st.header('⚡ Electrochemical cell')
- voltage=st.slider('Applied cell voltage (V)',0.,15.,5.,.5)
- resistance=st.slider('Effective cell resistance (Ω)',0.5,20.,4.,.5)
- duration=st.slider('Electrolysis time (min)',5,240,60,5)
- efficiency=st.slider('Faradaic efficiency (assumed, %)',10,100,75,5)/100
- cell_ph=st.slider('Cathode-region pH (assumed)',8.,13.,11.,.1)
- st.divider()
- st.info('All reaction efficiency relationships are illustrative. Calibrate using experiments and PHREEQC before predictive use.')
+    st.header('⚙️ Laboratory inputs')
+    volume=st.slider('Batch volume (L)',1.0,5.0,5.0,0.5)
+    ca=st.number_input('Feed Ca²⁺ (mg/L)',100.,5000.,800.,50.)
+    mg=st.number_input('Feed Mg²⁺ (mg/L)',100.,5000.,1500.,50.)
+    ph=st.slider('Precipitation pH',7.,12.,9.5,.1)
+    soda=st.slider('Na₂CO₃ dose (g/L)',0.,5.,2.2,.1)
+    st.header('⚡ Cell controls')
+    volts=st.slider('Applied voltage (V)',0.,15.,5.,.5)
+    resistance=st.slider('Assumed effective resistance (Ω)',1.,30.,4.,.5)
+    hours=st.slider('Electrolysis duration (min)',5,180,60,5)
+    faraday_eff=st.slider('Assumed Faradaic efficiency (%)',10,100,70,5)
+    st.info('pH response is illustrative, not PHREEQC. Voltage-to-current uses an assumed circuit, not measured electrode behavior.')
 
-# Explicit simplified screening model, NOT a thermodynamic equilibrium solver.
-ca_mol=ca/1000*volume/40.078
-mg_mol=mg/1000*volume/24.305
-carbonate_mol=dose*volume/105.99
-# assumed carbonate availability increases with pH (pKa2 ~10.33), with HCO3 contribution via dosing
-alpha_co3=1/(1+10**(10.33-ph))
-# scenario kinetic/availability factor, intentionally not an equilibrium calculation
-ca_potential=np.clip((ph-7.4)/1.7,0,1)
-ca_removed_mol=min(ca_mol*0.98*ca_potential,carbonate_mol*(0.35+0.65*alpha_co3))
-# Mg(OH)2 can precipitate at high pH, illustrative smooth transition; independent of carbonate complexation
-mg_loss_fraction=0.32/(1+np.exp(-(ph-10.6)*3.0))
-mg_lost_mol=mg_mol*mg_loss_fraction
-mg_available_mol=max(mg_mol-mg_lost_mol,0)
-# Lumped electrical model: onset voltage and ohmic resistance; actual electrolysis requires measured I-V
-current=max(voltage-1.8,0)/resistance
-charge=current*duration*60
-F=96485.33212
-# 2 e- -> 2 OH- for 1 Mg(OH)2 equivalent; pH adjustment factor is empirical placeholder
-ph_factor=1/(1+np.exp(-(cell_ph-9.8)*2.8))
-mg_converted_mol=min(mg_available_mol,charge*efficiency/(2*F)*ph_factor)
-ca_removal=100*ca_removed_mol/ca_mol if ca_mol else 0
-mg_loss=100*mg_lost_mol/mg_mol if mg_mol else 0
-mg_recovery=100*mg_converted_mol/mg_mol if mg_mol else 0
-caco3=ca_removed_mol*100.087
-mgh2=mg_converted_mol*58.3197
-energy_kwh=voltage*current*duration/60/1000
+# Illustrative precipitation response, explicitly not equilibrium chemistry.
+ca_feed=ca*volume/1000
+mg_feed=mg*volume/1000
+ca_fraction=max(0,min(.98, .38+ .6/(1+math.exp(-2*(ph-10.25)))))
+mg_loss_fraction=max(0,min(.5, .32/(1+math.exp(-2.4*(ph-10.5)))))
+# Na2CO3 stoichiometry: 1 mol per mol Ca; dose limits calcium removal.
+soda_moles=soda*volume/105.99
+ca_removed=min(ca_feed*ca_fraction, soda_moles*40.078)
+ca_remaining=ca_feed-ca_removed
+mg_lost=mg_feed*mg_loss_fraction
+mg_available=mg_feed-mg_lost
+caco3=ca_removed*100.087/40.078
+current=max(0,(volts-1.8)/resistance)
+charge=current*hours*60
+# 2 e- generate 2 OH-, enough for one Mg(OH)2 formula unit.
+mg_recovered=min(mg_available,charge*faraday_eff/100/(2*96485.33212)*24.305)
+mgoh2=mg_recovered*58.319/24.305
+energy=volts*current*hours/60/1000
+ca_pct=100*ca_removed/ca_feed if ca_feed else 0
+mg_loss_pct=100*mg_lost/mg_feed if mg_feed else 0
+mg_rec_pct=100*mg_recovered/mg_feed if mg_feed else 0
 
-st.subheader('🏭 Animated process line')
-svg=f'''<html><style>body{{margin:0;background:#071b30;font-family:Arial;color:#eef8ff}}svg{{width:100%;height:auto}}.water{{animation:rise 3s ease-in-out infinite alternate}}@keyframes rise{{from{{transform:translateY(5px)}}to{{transform:translateY(-4px)}}}}.flow{{stroke-dasharray:10 9;animation:move 1s linear infinite}}@keyframes move{{to{{stroke-dashoffset:-38}}}}.bubble{{animation:float 2s ease-in-out infinite alternate}}@keyframes float{{to{{transform:translateY(-14px);opacity:.25}}}}text{{font-family:Arial}}</style><svg viewBox="0 0 1100 400" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="tank" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#153a5b"/><stop offset="1" stop-color="#0d263d"/></linearGradient><linearGradient id="liquid" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#32c6db"/><stop offset="1" stop-color="#096f9e"/></linearGradient></defs><text x="25" y="30" font-size="19" font-weight="bold">ReMat • Integrated brine-to-magnesium process</text>
-<g stroke="#65d6e9" stroke-width="15" fill="none" opacity=".55"><path d="M210 210H282"/><path d="M470 210H550"/><path d="M748 210H826"/></g><g stroke="#4de8e5" stroke-width="6" fill="none" class="flow"><path d="M210 210H282"/><path d="M470 210H550"/><path d="M748 210H826"/></g>
-<g fill="url(#tank)" stroke="#6bbed4" stroke-width="4"><rect x="22" y="86" width="190" height="240" rx="18"/><rect x="282" y="86" width="190" height="240" rx="18"/><rect x="550" y="86" width="198" height="240" rx="18"/><rect x="826" y="86" width="240" height="240" rx="18"/></g>
-<g fill="url(#liquid)" opacity=".8" class="water"><path d="M27 206H207V310Q207 320 197 320H37Q27 320 27 310Z"/><path d="M287 206H467V310Q467 320 457 320H297Q287 320 287 310Z"/><path d="M555 206H743V310Q743 320 733 320H565Q555 320 555 310Z"/><path d="M831 206H1061V310Q1061 320 1051 320H841Q831 320 831 310Z"/></g>
-<g fill="#fff" font-size="16" text-anchor="middle" font-weight="bold"><text x="117" y="116">1 • Pre-filter</text><text x="377" y="116">2 • Ca precipitation</text><text x="649" y="116">3 • Electrochemical</text><text x="946" y="116">4 • Recovery</text></g>
-<g fill="#d4f5fc" font-size="13" text-anchor="middle"><text x="117" y="140">5 µm filter</text><text x="377" y="140">Na₂CO₃ dosing</text><text x="649" y="140">{voltage:.1f} V • {current:.2f} A</text><text x="946" y="140">Mg(OH)₂ collection</text></g>
-<g stroke="#c8eaf3" stroke-width="6"><path d="M90 175V295M105 175V295M120 175V295M135 175V295"/><path d="M607 170V285" stroke="#f8a75b" stroke-width="11"/><path d="M685 170V285" stroke="#b9e5ff" stroke-width="11"/></g>
-<g fill="#e9f4c3" opacity=".9"><circle class="bubble" cx="355" cy="260" r="6"/><circle class="bubble" cx="387" cy="284" r="8"/><circle class="bubble" cx="420" cy="265" r="5"/><circle class="bubble" cx="633" cy="270" r="6"/><circle class="bubble" cx="667" cy="250" r="4"/><circle cx="923" cy="282" r="10"/><circle cx="956" cy="292" r="7"/><circle cx="981" cy="275" r="8"/></g>
-<g fill="#b4eaf2" font-size="13" text-anchor="middle"><text x="117" y="356">Feed: {volume:g} L</text><text x="377" y="356">CaCO₃: {caco3:.2f} g</text><text x="649" y="356">Mg recovery: {mg_recovery:.1f}%</text><text x="946" y="356">Mg(OH)₂: {mgh2:.2f} g</text></g></svg></html>'''
-components.html(svg,height=340,scrolling=False)
+st.subheader('1. Run the laboratory sequence')
+c1,c2,c3,c4=st.columns(4)
+with c1:
+    if st.button('▶ Start' if not st.session_state.running else '⏸ Pause',use_container_width=True): st.session_state.running=not st.session_state.running
+with c2:
+    if st.button('⏭ Next stage',use_container_width=True):
+        st.session_state.stage=min(3,st.session_state.stage+1);st.session_state.progress=0
+with c3:
+    if st.button('⏮ Previous',use_container_width=True):
+        st.session_state.stage=max(0,st.session_state.stage-1);st.session_state.progress=0
+with c4:
+    if st.button('↺ Reset',use_container_width=True):
+        st.session_state.stage=0;st.session_state.running=False;st.session_state.progress=0
+stage=st.session_state.stage
+progress=st.slider('Stage progress (%) — scrub to inspect the experiment',0,100,key='progress',step=5)
+st.write(f'**Active stage {stage+1}/4:** {STAGES[stage]} · **Visual playback:** {"Running" if st.session_state.running else "Paused"}')
+# SVG shows physically recognizable equipment and piping, with animated liquid / precipitation / bubbles.
+# Animation is illustrative only. No simulation clock or CFD solver.
+active=stage
+run='running' if st.session_state.running else 'paused'
+fill=min(1,max(.06,progress/100))
+svg=f'''<html><head><style>
+body{{margin:0;background:#081b2d;color:#eef7ff;font-family:Arial,sans-serif}}
+svg{{width:100%;height:auto;display:block}}
+.particle{{animation:float 2.2s infinite alternate ease-in-out;animation-play-state:{run}}}
+.flow{{stroke-dasharray:11 12;animation:dash 1.1s linear infinite;animation-play-state:{run}}}
+.bubble{{animation:rise 2.4s infinite linear;animation-play-state:{run}}}
+@keyframes dash{{to{{stroke-dashoffset:-46}}}}
+@keyframes float{{to{{transform:translateY(13px)}}}}
+@keyframes rise{{0%{{transform:translateY(28px);opacity:.1}}50%{{opacity:1}}100%{{transform:translateY(-35px);opacity:.1}}}}
+</style></head><body><svg viewBox="0 0 1080 420" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="water" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#38d6e5"/><stop offset="1" stop-color="#086a9c"/></linearGradient><clipPath id="tank"><rect x="0" y="0" width="190" height="235" rx="17"/></clipPath></defs>
+<text x="30" y="33" font-size="19" fill="#dff7ff">ReMat bench-scale train · schematic (not to scale)</text>
+<path d="M216 167 H278 M486 167 H550 M758 167 H820" fill="none" stroke="#335b74" stroke-width="18"/>
+<path d="M216 167 H278 M486 167 H550 M758 167 H820" fill="none" stroke="#42e5e2" stroke-width="7" class="flow"/>
+<g fill="#153c54" stroke="#70cde3" stroke-width="4">
+<rect x="20" y="90" width="196" height="242" rx="20"/><rect x="286" y="90" width="200" height="242" rx="20"/><rect x="558" y="90" width="200" height="242" rx="20"/><rect x="824" y="90" width="200" height="242" rx="20"/></g>
+<g fill="url(#water)" opacity=".83"><path d="M25 185 H211 V311 Q211 327 193 327 H43 Q25 327 25 311Z"/><path d="M291 185 H481 V311 Q481 327 463 327 H309 Q291 327 291 311Z"/><path d="M563 185 H753 V311 Q753 327 735 327 H581 Q563 327 563 311Z"/><path d="M829 185 H1019 V311 Q1019 327 1001 327 H847 Q829 327 829 311Z"/></g>
+<g fill="#f3f9ff" font-size="15" text-anchor="middle"><text x="118" y="70">1. 5 µm filter</text><text x="386" y="70">2. CaCO₃ precipitation</text><text x="658" y="70">3. Electrochemical cell</text><text x="924" y="70">4. Product collection</text></g>
+<g stroke="#f2fbff" stroke-width="7"><path d="M88 125V288 M108 125V288 M128 125V288 M148 125V288"/></g>
+<path d="M386 89 V140" stroke="#e9bc53" stroke-width="9"/><path d="M366 98 H406" stroke="#e9bc53" stroke-width="5"/><text x="395" y="116" fill="#fff1b9" font-size="11">dose</text>
+<g stroke-width="11"><path d="M632 124 V279" stroke="#ff9f59"/><path d="M692 124 V279" stroke="#b6e8fa"/></g>
+<g fill="#c7e5f5" font-size="14"><text x="621" y="115">+</text><text x="690" y="115">−</text></g>
+<g fill="#e7e0a2"><circle cx="904" cy="284" r="9"/><circle cx="935" cy="292" r="7"/><circle cx="959" cy="274" r="10"/></g>
+<g opacity="{1 if stage>=1 else .08}"><circle class="particle" cx="349" cy="258" r="7" fill="#efe8be"/><circle class="particle" cx="392" cy="290" r="9" fill="#efe8be"/><circle class="particle" cx="432" cy="270" r="6" fill="#efe8be"/></g>
+<g opacity="{1 if stage>=2 else .08}"><circle class="bubble" cx="689" cy="247" r="6" fill="#dbf8ff"/><circle class="bubble" cx="700" cy="222" r="4" fill="#dbf8ff"/><circle class="bubble" cx="679" cy="260" r="5" fill="#dbf8ff"/></g>
+<g fill="#8dd7e9" font-size="13" text-anchor="middle"><text x="118" y="359">Pre-filter</text><text x="386" y="359">Soda ash + stirring</text><text x="658" y="359">{volts:.1f} V · {current:.2f} A</text><text x="924" y="359">Mg(OH)₂ separation</text></g>
+<rect x="22" y="384" width="1032" height="9" rx="4" fill="#315067"/><rect x="22" y="384" width="{(stage+fill)*1032/4:.1f}" height="9" rx="4" fill="#56e0bf"/>
+</svg></body></html>'''
+components.html(svg,height=385,scrolling=False)
+st.caption('Visual animations play only when Start is selected. Next stage changes the active step; the progress slider is a visual scrubber, not elapsed real time.')
+
+st.subheader('2. Scenario outputs at selected settings')
 a,b,c,d=st.columns(4)
-a.metric('Ca removal (scenario)',f'{ca_removal:.1f}%')
-b.metric('Mg lost in Ca stage (scenario)',f'{mg_loss:.1f}%')
-c.metric('Mg recovered (scenario)',f'{mg_recovery:.1f}%')
-d.metric('Energy (electrical)',f'{energy_kwh:.4f} kWh')
-if mg_loss>5:st.warning('⚠️ Significant magnesium co-precipitation is possible in the Ca-removal stage at this pH (illustrative estimate).')
-if carbonate_mol<ca_removed_mol:st.warning('Carbonate dosing is below modeled Ca precipitation demand.')
-st.caption('The process animation is schematic; flow, solids and bubbles are not physically simulated. pH response is a screening heuristic, not PHREEQC equilibrium. Voltage response uses an assumed onset voltage and resistance.')
-left,right=st.columns(2)
+a.metric('Ca removal (illustrative)',f'{ca_pct:.1f}%')
+b.metric('Mg lost in Ca stage (illustrative)',f'{mg_loss_pct:.1f}%')
+c.metric('Mg recovered (Faraday-limited)',f'{mg_rec_pct:.1f}%')
+d.metric('Electrical energy (estimated)',f'{energy:.4f} kWh')
+rows=[('Ca²⁺ in feed',ca_feed),('Ca²⁺ removed',ca_removed),('Ca²⁺ remaining',ca_remaining),('Mg²⁺ in feed',mg_feed),('Mg²⁺ lost in Ca stage',mg_lost),('Mg²⁺ recovered in cell',mg_recovered),('CaCO₃ solid (ideal mass)',caco3),('Mg(OH)₂ solid (ideal mass)',mgoh2)]
+df=pd.DataFrame(rows,columns=['Quantity','Mass (g)'])
+left,right=st.columns([1,1])
 with left:
- st.subheader('Mass balance')
- df=pd.DataFrame({'Quantity':['Ca in feed','Ca removed','Ca remaining','Mg in feed','Mg lost during Ca stage','Mg recovered as Mg(OH)₂','CaCO₃ solids','Mg(OH)₂ solids'],'Mass (g)':[ca_mol*40.078,ca_removed_mol*40.078,(ca_mol-ca_removed_mol)*40.078,mg_mol*24.305,mg_lost_mol*24.305,mg_converted_mol*24.305,caco3,mgh2]})
- st.dataframe(df,hide_index=True,use_container_width=True)
+    st.dataframe(df,use_container_width=True,hide_index=True)
+    st.download_button('⬇ Download scenario mass balance CSV',df.to_csv(index=False).encode('utf-8'),file_name='ReMat_V3_scenario.csv',mime='text/csv')
 with right:
- st.subheader('Electrical model')
- st.write(f'Estimated current: **{current:.2f} A** · Charge: **{charge:.0f} C** · Energy: **{energy_kwh:.4f} kWh**')
- st.write('Faraday-limited Mg(OH)₂ formation: 2 mol electrons per mol Mg(OH)₂. This assumes sufficient Mg²⁺ and does not predict real electrode selectivity, mass transfer or electrode overpotentials.')
- st.write('For experimental calibration, measure: actual current vs. voltage, conductivity, electrode area, cathode pH, Mg/Ca after each stage, product purity and energy.')
+    st.write(f'**Cell:** {current:.2f} A · {charge:.0f} C · {energy:.4f} kWh')
+    st.write(f'**Soda ash:** {soda*volume:.2f} g added · theoretical minimum for calculated Ca removal: {ca_removed/40.078*105.99:.2f} g')
+    st.write('**Important:** pH response is an assumed screening curve. The cell model uses I = max(V − 1.8, 0) / R and Faraday’s law with assumed efficiency. It does not predict electrode selectivity, measured current, or product purity.')
 
-st.subheader('Sensitivity analyses (same assumptions)')
-phs=np.linspace(7,12,101)
-ca_curve=[];loss_curve=[]
-for p in phs:
- a=1/(1+10**(10.33-p)); ca_curve.append(100*min(ca_mol*0.98*np.clip((p-7.4)/1.7,0,1),carbonate_mol*(0.35+0.65*a))/ca_mol)
- loss_curve.append(100*.32/(1+np.exp(-(p-10.6)*3)))
-fig=go.Figure();fig.add_trace(go.Scatter(x=phs,y=ca_curve,name='Ca removal (scenario)'));fig.add_trace(go.Scatter(x=phs,y=loss_curve,name='Mg loss (scenario)'));fig.add_vline(x=ph,line_dash='dash');fig.update_layout(xaxis_title='Precipitation pH',yaxis_title='Fraction (%)',height=350,margin=dict(t=15,b=30));st.plotly_chart(fig,use_container_width=True)
-volts=np.linspace(0,15,100); recovered=[]
-for v in volts:
- q=max(v-1.8,0)/resistance*duration*60
- recovered.append(100*min(mg_available_mol,q*efficiency/(2*F)*ph_factor)/mg_mol)
-fig2=go.Figure(go.Scatter(x=volts,y=recovered,name='Mg recovery (scenario)'));fig2.add_vline(x=voltage,line_dash='dash');fig2.update_layout(xaxis_title='Applied cell voltage (V)',yaxis_title='Mg recovery (%)',height=320,margin=dict(t=15,b=30));st.plotly_chart(fig2,use_container_width=True)
-st.download_button('⬇️ Download current mass balance CSV',df.to_csv(index=False).encode(),file_name='remat_v2_mass_balance.csv',mime='text/csv')
-with st.expander('Scientific limitations and next calibration steps'):
- st.markdown('''**This is an exploratory model, not a validated digital twin.** The calcium and magnesium precipitation curves are assumed functions for demonstration; real brine chemistry depends on alkalinity, ionic strength, carbonate speciation, activity coefficients, salinity, temperature, competing ions, mixing and precipitation kinetics. A PHREEQC/Pitzer model is recommended for brine equilibrium. The cell current uses I = max(V − 1.8 V, 0)/R, a placeholder electrical model. Electrolysis results require experimentally measured polarization curves, Faradaic efficiency, electrode area, cathode pH and mass-transfer effects. **Do not use these outputs as measured recovery or purity.**''')
+st.subheader('3. Explore pH and voltage effects')
+phs=[7+i*.1 for i in range(51)]
+ca_curve=[]; mg_curve=[]
+for x in phs:
+    cf=max(0,min(.98,.38+.6/(1+math.exp(-2*(x-10.25)))))
+    ml=max(0,min(.5,.32/(1+math.exp(-2.4*(x-10.5)))))
+    ca_curve.append(100*min(ca_feed*cf,soda_moles*40.078)/ca_feed)
+    mg_curve.append(100*ml)
+fig=go.Figure()
+fig.add_trace(go.Scatter(x=phs,y=ca_curve,name='Ca removal (scenario)'))
+fig.add_trace(go.Scatter(x=phs,y=mg_curve,name='Mg loss (scenario)'))
+fig.add_vline(x=ph,line_dash='dash')
+fig.update_layout(xaxis_title='Precipitation pH',yaxis_title='Fraction (%)',height=340,margin=dict(l=10,r=10,t=10,b=10))
+st.plotly_chart(fig,use_container_width=True)
+vs=[i*.5 for i in range(31)]
+rec=[100*min(mg_available,max(0,(v-1.8)/resistance)*hours*60*faraday_eff/100/(2*96485.33212)*24.305)/mg_feed for v in vs]
+fig2=go.Figure(go.Scatter(x=vs,y=rec,name='Faraday-limited Mg recovery'))
+fig2.add_vline(x=volts,line_dash='dash')
+fig2.update_layout(xaxis_title='Applied cell voltage (V)',yaxis_title='Mg recovery (% of initial Mg)',height=340,margin=dict(l=10,r=10,t=10,b=10))
+st.plotly_chart(fig2,use_container_width=True)
+with st.expander('Scientific limitations — read before interpreting results',expanded=True):
+    st.warning('This is a virtual lab demonstrator, not a calibrated chemical process model. The tanks, bubbles and solids are illustrative animations; they do not reproduce fluid dynamics, mixing, reaction kinetics or precipitation time. The pH curves are assumed and are not equilibrium calculations. The voltage-current relationship is assumed; real electrochemical performance depends on measured polarization, conductivity, electrode area, local cathode pH and competing reactions. No purity is predicted. Validate against experiments and PHREEQC/Pitzer calculations before using results in scientific claims.')
